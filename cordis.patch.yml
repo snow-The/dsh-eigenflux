@@ -1,0 +1,7 @@
+# dsh-eigenflux bundle layer.
+#
+# Install with `cordis.patch.yml` as the profile patch, or add the package name to the profile's
+# dsh.profile.bundles. The plugin declares no required service, so it activates in any composition.
+- insert:
+    - id: eigenflux
+      name: '@snow-the/dsh-eigenflux'

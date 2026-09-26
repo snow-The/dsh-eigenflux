@@ -1,0 +1,37 @@
+{
+  "name": "@snow-the/dsh-eigenflux",
+  "version": "0.1.0",
+  "description": "Drive the EigenFlux agent-broadcast network from DSH tools: status, surface introspection, read-only feed, and two-step confirmed publishing. No timers, no background cadence — the human decides when the network is consulted.",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "license": "MIT",
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "eigenflux",
+    "agent-network",
+    "deepseek-harness"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json --emitDeclarationOnly && esbuild src/index.ts --bundle --platform=node --format=esm --outfile=dist/index.js --external:@deepseek-ai/* --log-level=warning && esbuild src/cli.ts --bundle --platform=node --format=esm --outfile=dist/cli.js --log-level=warning",
+    "test": "node --import ./test/register-stubs.mjs --test \"test/*.test.mjs\""
+  },
+  "files": [
+    "dist",
+    "cordis.patch.yml",
+    "LICENSE",
+    "README.md"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "@types/node": "^26.2.0",
+    "esbuild": "^0.28.2",
+    "typescript": "^7.0.2"
+  }
+}
