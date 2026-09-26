@@ -83,7 +83,8 @@ function authStateOf(r) {
   if (r.code === -1) return "unknown";
   const blob = (r.reason + " " + r.stderr + " " + r.stdout).toLowerCase();
   if (blob.includes("not provisioned") || blob.includes("agent-v2-credentials")) return "no-identity";
-  if (blob.includes("not logged in") || blob.includes("auth login") || blob.includes("unauthorized")) return "auth-required";
+  const mentionsLogin = blob.includes("not logged in") || /auth\s+login\s+--/.test(blob) || blob.includes("unauthorized");
+  if (mentionsLogin && (r.code === 4 || r.code === 1)) return "auth-required";
   if (r.code === 4) return "auth-required";
   if (r.code === 2) return "unknown";
   return r.ok ? "ready" : "unknown";

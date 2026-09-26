@@ -160,7 +160,12 @@ export function authStateOf(r: EfResult): EfAuthState {
   const blob = (r.reason + ' ' + r.stderr + ' ' + r.stdout).toLowerCase();
   // Wording first: exit 2 is a usage error, and only its text says WHICH usage problem this is.
   if (blob.includes('not provisioned') || blob.includes('agent-v2-credentials')) return 'no-identity';
-  if (blob.includes('not logged in') || blob.includes('auth login') || blob.includes('unauthorized')) return 'auth-required';
+  // Match the REMEDY, not the bare words. A usage error can also name authentication: a bad
+  // `--lang` value produced "--lang must be zh-CN or en" alongside advice to run `auth login`, and
+  // substring-matching that advice reported a false account state on a fully provisioned machine.
+  // An auth verdict now needs the login wording AND a code that could carry it.
+  const mentionsLogin = blob.includes('not logged in') || /auth\s+login\s+--/.test(blob) || blob.includes('unauthorized');
+  if (mentionsLogin && (r.code === 4 || r.code === 1)) return 'auth-required';
   if (r.code === 4) return 'auth-required';
   if (r.code === 2) return 'unknown'; // usage error: nothing may be inferred about credentials
   return r.ok ? 'ready' : 'unknown';

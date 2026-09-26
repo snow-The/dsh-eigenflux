@@ -48,6 +48,32 @@ test('exit 4 is auth-required even without the matching wording', () => {
   assert.equal(authStateOf(res({ code: 4 })), 'auth-required');
 });
 
+test('a usage error that mentions login is not an auth verdict', () => {
+  // The real bug: `authStateOf` matched the bare substring 'auth login', so ANY text containing
+  // that phrase became an auth verdict regardless of the exit code. On a fully provisioned machine
+  // ef_status then reported "identity may exist but this session is not logged in" while the
+  // registry loaded fine on the next call.
+  //
+  // HONESTY NOTE: the string below is a RECONSTRUCTION, not a transcript. The measured output of
+  // `capabilities` without `--lang` is only "--lang must be zh-CN or en" (exit 2). The composed
+  // string is kept because it is the widest realistic case for the over-broad matcher -- a usage
+  // error whose advice also names authentication -- and the assertion is about the MATCHER, not
+  // about that particular transcript. Codes that cannot carry an auth meaning must stay 'unknown'
+  // no matter what words appear.
+  const usageError = res({
+    code: 2,
+    reason: 'clientMeta.Lang is empty: --lang must be zh-CN or en. Also: run \'eigenflux auth login --email <email>\' first',
+  });
+  assert.equal(authStateOf(usageError), 'unknown');
+
+  // The measured usage error, verbatim, is unknown too.
+  assert.equal(authStateOf(res({ code: 2, reason: '--lang must be zh-CN or en' })), 'unknown');
+
+  // But the same wording on a code that CAN carry it is an auth verdict.
+  assert.equal(authStateOf(res({ code: 4, reason: "run 'eigenflux auth login --email <email>' first" })), 'auth-required');
+  assert.equal(authStateOf(res({ code: 1, reason: 'not logged in to server "eigenflux"' })), 'auth-required');
+});
+
 test('never-ran and other failures stay unknown, and every state has a phrase', () => {
   assert.equal(authStateOf(res({ code: -1 })), 'unknown');
   assert.equal(authStateOf(res({ ok: false, code: 1, reason: 'timed out after 45s' })), 'unknown');
