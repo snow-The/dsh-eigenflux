@@ -14,6 +14,11 @@ export interface RunOptions {
     timeoutSec?: number;
     /** Extra argv appended after the subcommand. */
     args?: string[];
+    /**
+     * Do not append the global `--format json --no-interactive`. Required for help requests: the root
+     * `--help` rejects them as positional arguments ("unknown command \"json\"", exit 2, no output).
+     */
+    raw?: boolean;
 }
 /**
  * Locate the binary.
@@ -30,10 +35,18 @@ export declare function resolveHome(env?: NodeJS.ProcessEnv): string;
 /**
  * Run one CLI command.
  *
- * `--no-interactive` and `--format json` are always passed: the first guarantees a prompt can never
- * block a turn, the second guarantees the payload is parseable. An exit code of 2 means "not
- * provisioned" on this CLI, which callers must treat as a distinct state rather than a failure
- * (provisioning is a human decision — see `ef_status`).
+ * `--format json` and `--no-interactive` are added for NORMAL commands: the first keeps the payload
+ * parseable, the second guarantees a prompt can never block a turn.
+ *
+ * They are NOT added when the invocation is a help request. Heuristic flag-appending assumed the
+ * CLI tolerates global flags anywhere; for the ROOT `--help` it does not, because cobra parses the
+ * root as a command with a Run and no arguments, so the appended words become positional args:
+ *
+ *   eigenflux --help                          -> 2595 chars, exit 0
+ *   eigenflux --help --format json --no-interactive -> "" , exit 2, `unknown command "json"`
+ *
+ * Asking `--help` for JSON output was never meaningful anyway: help is text. `opts.raw` opts out,
+ * and the two places that read help pass it.
  */
 export declare function runEf(subcommand: string[], opts?: RunOptions): Promise<EfResult>;
 /**
@@ -50,6 +63,20 @@ export interface Surface {
         summary: string;
     }[];
 }
+/**
+ * Parse cobra's "Available Commands:" table out of a --help dump.
+ *
+ * Pure and exported so it can be tested against a verbatim help transcript. The first version was
+ * not, and it carried a formatting assumption that broke exactly one of the two shapes the CLI
+ * emits: it stopped at the first blank line, and cobra puts a blank line immediately after the
+ * "Available Commands:" header. Subcommand help happened to have no blank there, so the top-level
+ * surface read as empty while every subcommand read fine -- a parser that fails on half its inputs
+ * and looks correct on the other half.
+ */
+export declare function parseCommandTable(text: string): {
+    name: string;
+    summary: string;
+}[];
 export declare function introspect(cmd?: string): Promise<Surface>;
 /**
  * The CLI's own exit-code contract (cli/internal/output/output.go:15-23):

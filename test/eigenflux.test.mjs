@@ -86,6 +86,22 @@ test('ef_surface reads the real command surface from the binary', async () => {
   assert.match(text, /来自二进制自身的 --help/, 'the source of the table must be stated: ' + text);
 });
 
+test('bare ef_surface lists the TOP-LEVEL commands — the case that read as "not installed"', async () => {
+  // Two independent defects met here. The parser stopped at the blank line cobra prints right after
+  // "Available Commands:", so the top-level table came back empty while every subcommand worked.
+  // Then, with that fixed, the wrapper was STILL appending `--format json --no-interactive` to a help
+  // request, and the ROOT command rejects those as positional arguments ("unknown command \"json\"",
+  // exit 2, no output) -- so the tool kept reporting "no subcommands found", which reads as "the
+  // binary is missing" rather than "the wrapper asked the wrong question".
+  const tools = boot();
+  const surface = tools.find((t) => t.name === 'ef_surface');
+  const text = await surface.execute({}, {});
+  assert.ok(!/未解析到子命令/.test(text), 'bare ef_surface must resolve the top-level table: ' + text);
+  for (const expected of ['feed', 'publish', 'msg', 'agent', 'heartbeat']) {
+    assert.match(text, new RegExp('\\b' + expected + '\\b'), `top-level surface must list ${expected}: ` + text);
+  }
+});
+
 test('ef_publish previews and sends nothing, and a wrong token is refused', async () => {
   const tools = boot();
   const publish = tools.find((t) => t.name === 'ef_publish');

@@ -48,7 +48,8 @@ async function runEf(subcommand, opts = {}) {
       reason: "eigenflux CLI not found (looked for EIGENFLUX_BIN, %LOCALAPPDATA%\\local\\bin, ~/.local/bin, D:\\eigenflux)"
     };
   }
-  const args = [...subcommand, "--format", "json", "--no-interactive", ...opts.args ?? []];
+  const globalFlags = opts.raw === true ? [] : ["--format", "json", "--no-interactive"];
+  const args = [...subcommand, ...globalFlags, ...opts.args ?? []];
   const timeout = (opts.timeoutSec ?? 45) * 1e3;
   return await new Promise((resolve) => {
     execFile(bin, args, { timeout, maxBuffer: 8 * 1024 * 1024, windowsHide: true }, (err, stdout, stderr) => {
@@ -65,9 +66,7 @@ async function runEf(subcommand, opts = {}) {
     });
   });
 }
-async function introspect(cmd = "") {
-  const r = await runEf([...cmd ? cmd.split(" ") : [], "--help"]);
-  const text = r.stdout || r.stderr;
+function parseCommandTable(text) {
   const commands = [];
   let inList = false;
   for (const line of text.split(/\r?\n/)) {
@@ -75,13 +74,17 @@ async function introspect(cmd = "") {
       inList = true;
       continue;
     }
-    if (inList) {
-      if (/^\s*$/.test(line)) break;
-      const m = /^\s{2,}(\S+)\s{2,}(.+)$/.exec(line);
-      if (m) commands.push({ name: m[1], summary: m[2].trim() });
-    }
+    if (!inList) continue;
+    if (/^\S.*:\s*$/.test(line)) break;
+    if (/^\s*$/.test(line)) continue;
+    const m = /^\s{2,}(\S+)\s{2,}(.+)$/.exec(line);
+    if (m) commands.push({ name: m[1], summary: m[2].trim() });
   }
-  return { commands };
+  return commands;
+}
+async function introspect(cmd = "") {
+  const r = await runEf([...cmd ? cmd.split(" ") : [], "--help"], { raw: true });
+  return { commands: parseCommandTable(r.stdout || r.stderr) };
 }
 function authStateOf(r) {
   if (r.code === -1) return "unknown";
