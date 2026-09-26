@@ -125,6 +125,58 @@ test('ef_msg previews with the reply target and refuses an unknown token', async
   assert.match(refused, /令牌无效或已过期/, refused);
 });
 
+test('the reply target survives a STRING item id — dropping it silently would misroute a reply', async () => {
+  // The declared type is integer, but a tool argument can arrive as a string, and the first version
+  // guarded with `Number.isFinite(args.item_id)` -- false for every string. The flag was then omitted
+  // with no complaint: the preview looked perfectly normal, just without a reply target, so the
+  // message would have gone out as a new message addressed to nobody. Only a string id exposes it,
+  // which is exactly why the number-only test above passed.
+  const tools = boot();
+  const msg = tools.find((t) => t.name === 'ef_msg');
+  const asString = await msg.execute({ content: 'reply', item_id: '362115728905601024' }, {});
+  assert.match(asString, /--item-id 362115728905601024/, asString);
+
+  // Small numbers are safe and still work.
+  assert.match(await msg.execute({ content: 'r', item_id: 99 }, {}), /--item-id 99/);
+  assert.match(await msg.execute({ content: 'r', item_id: ' 77 ' }, {}), /--item-id 77/);
+
+  // Absent / empty simply omits the flag.
+  for (const none of [null, undefined, '', '  ']) {
+    const t = await msg.execute({ content: 'r', item_id: none }, {});
+    assert.ok(!/--item-id/.test(t), `absent id ${JSON.stringify(none)} must omit the flag: ` + t);
+  }
+
+  // Nonsense is REFUSED, not silently dropped: the caller must not believe it set a reply target.
+  for (const junk of ['abc', '12.5']) {
+    const t = await msg.execute({ content: 'r', item_id: junk }, {});
+    assert.match(t, /必须/, `junk id ${JSON.stringify(junk)} must be refused with a reason: ` + t);
+    assert.ok(!/--item-id/.test(t), t);
+  }
+});
+
+test('an 18-digit id passed as a NUMBER is refused, never rounded into a different item', async () => {
+  // EigenFlux ids are snowflakes: 362115728905601024 > Number.MAX_SAFE_INTEGER (9007199254740991).
+  // As a JS number it becomes 362115728905601000 -- a DIFFERENT item. Sending a reply to the wrong
+  // agent silently is worse than dropping the flag, and this is measured, not theorised:
+  //   String(362115728905601024) === "362115728905601000"
+  const tools = boot();
+  const msg = tools.find((t) => t.name === 'ef_msg');
+
+  const rounded = await msg.execute({ content: 'reply', item_id: 362115728905601024 }, {});
+  assert.ok(!/--item-id 362115728905601000/.test(rounded), 'must not send the ROUNDED id: ' + rounded);
+  assert.ok(!/--item-id/.test(rounded), 'must not send any id derived from an unsafe number: ' + rounded);
+  assert.match(rounded, /超出 JS 安全整数范围/, rounded);
+  assert.match(rounded, /字符串/, 'the refusal must say how to fix it: ' + rounded);
+
+  // The boundary itself is usable, so the guard rejects only what is genuinely corrupted.
+  assert.match(await msg.execute({ content: 'r', item_id: Number.MAX_SAFE_INTEGER }, {}),
+    new RegExp('--item-id ' + Number.MAX_SAFE_INTEGER));
+
+  // And the same id as a string is passed through EXACTLY.
+  assert.match(await msg.execute({ content: 'r', item_id: '362115728905601024' }, {}),
+    /--item-id 362115728905601024$/m);
+});
+
 test('ef_feed reports the identity state instead of dressing a refusal as content', async () => {
   const tools = boot();
   const feed = tools.find((t) => t.name === 'ef_feed');

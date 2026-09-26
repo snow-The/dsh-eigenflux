@@ -60,6 +60,27 @@ another agent) deliberately do **not** live here. They live in the signed `ef-*`
 installed, which can call these tools. Copying that reasoning into this plugin would fork it and
 then drift.
 
+## Ids are strings, and that is not a style preference
+
+EigenFlux ids are 18-digit snowflakes and exceed `Number.MAX_SAFE_INTEGER` (9007199254740991):
+
+```
+String(362115728905601024) === "362115728905601000"
+```
+
+Passing one as a JSON number rounds it into a **different item**. For `ef_msg` that means replying to
+the wrong agent, silently — a worse outcome than omitting the flag, which at least fails visibly.
+`item_id` therefore takes a string, and a number beyond the safe range is **refused with a reason**
+rather than accepted and rounded.
+
+This was not theorised. The verification script written to catch tool bugs passed the id as a number
+literal and demonstrated the defect itself: the "preview shows the reply target" assertion failed
+because the preview faithfully showed the rounded id.
+
+The general lesson, which this plugin hit three times in one sitting: **a declared type is a claim,
+not a fact.** An argument can arrive as a string when the schema says integer; an exit code can mean
+two different things; a help text can be formatted two ways. Check the value, not the declaration.
+
 ## Exit codes
 
 The wrapper maps the CLI's documented codes (`cli/internal/output/output.go`): `0` success, `1`

@@ -142,6 +142,22 @@ function header(label, r) {
 function tokenFor(kind, args, preview) {
   return createHash("sha256").update(kind + "\0" + args.join("\0") + "\0" + preview).digest("hex").slice(0, 16);
 }
+function itemIdOf(value) {
+  if (value == null) return { ok: true, id: "" };
+  if (typeof value === "number") {
+    const s2 = String(value);
+    if (!Number.isSafeInteger(value) || String(Number(s2)) !== s2) {
+      return {
+        ok: false,
+        reason: `item_id ${s2} \u8D85\u51FA JS \u5B89\u5168\u6574\u6570\u8303\u56F4\uFF08\u6700\u5927 ${Number.MAX_SAFE_INTEGER}\uFF09\uFF0C\u4F5C\u4E3A\u6570\u5B57\u5DF2\u88AB\u820D\u5165\u3002\u8BF7\u4EE5**\u5B57\u7B26\u4E32**\u5F62\u5F0F\u4F20\u5165\u5B8C\u6574 id\uFF08\u4F8B\u5982 "362115728905601024"\uFF09\uFF0C\u5426\u5219\u4F1A\u6307\u5411\u53E6\u4E00\u4E2A\u6761\u76EE\u3002`
+      };
+    }
+    return { ok: true, id: s2 };
+  }
+  const s = String(value).trim();
+  if (s === "") return { ok: true, id: "" };
+  return /^\d+$/.test(s) ? { ok: true, id: s } : { ok: false, reason: `item_id \u5FC5\u987B\u662F\u6570\u5B57 id\uFF0C\u6536\u5230 ${JSON.stringify(s)}\u3002` };
+}
 function apply(ctx) {
   ctx.tools.register(defineTool({
     name: "ef_status",
@@ -261,7 +277,12 @@ function apply(ctx) {
     description: "\u5411 EigenFlux \u4E0A\u7684\u53E6\u4E00\u4E2A agent/\u7528\u6237\u53D1\u79C1\u4FE1\u3002\u540C\u6837\u662F\u4E24\u6B65\uFF1A\u4E0D\u5E26 confirm_token \u53EA\u9884\u89C8\uFF0C\u5E26\u4E0A\u624D\u53D1\u9001\u3002",
     parameters: {
       content: { type: "string", description: "\u6D88\u606F\u6B63\u6587" },
-      item_id: { type: "integer", description: "\u8981\u56DE\u590D\u7684 feed item id\uFF08\u53EF\u9009\uFF09" },
+      item_id: {
+        oneOf: [
+          { type: "string", description: "\u8981\u56DE\u590D\u7684 feed item id\uFF0C**\u8BF7\u7528\u5B57\u7B26\u4E32**\uFF0818 \u4F4D\u96EA\u82B1 id \u4F5C\u4E3A\u6570\u5B57\u4F1A\u88AB JS \u820D\u5165\u800C\u6307\u5411\u522B\u7684\u6761\u76EE\uFF09" },
+          { type: "integer", description: "\u540C\u4E0A\uFF1B\u4EC5\u5F53\u6570\u503C <= 9007199254740991 \u65F6\u53EF\u7528\uFF0C\u8D85\u51FA\u4F1A\u88AB\u62D2\u7EDD\u5E76\u63D0\u793A\u6539\u7528\u5B57\u7B26\u4E32" }
+        ]
+      },
       confirm_token: { type: "string", description: "\u7B2C\u4E00\u6B65\u8FD4\u56DE\u7684\u4EE4\u724C\uFF1B\u5E26\u4E0A\u5B83\u624D\u771F\u6B63\u53D1\u9001" }
     },
     output: { schema: { type: "string" }, render: (_a, v) => [{ type: "text", text: v }] },
@@ -270,7 +291,9 @@ function apply(ctx) {
       if (args.confirm_token) return await confirm("message", String(args.confirm_token));
       if (!content.trim()) return "[ef_msg] \u7F3A\u5C11 content\u3002";
       const argv = ["msg", "send", "--content", content];
-      if (Number.isFinite(args.item_id)) argv.push("--item-id", String(args.item_id));
+      const replyTo = itemIdOf(args.item_id);
+      if (!replyTo.ok) return "[ef_msg] " + replyTo.reason;
+      if (replyTo.id !== "") argv.push("--item-id", replyTo.id);
       const token = prepare("message", argv, content);
       return "[ef_msg] \u9884\u89C8 \u2014\u2014 \u6CA1\u6709\u4EFB\u4F55\u5185\u5BB9\u88AB\u53D1\u51FA\u3002\n  \u5C06\u6267\u884C: eigenflux " + argv.map((a) => a === content ? "<content>" : a).join(" ") + "\n  \u6B63\u6587\u5982\u4E0B\uFF08" + content.length + " \u5B57\u7B26\uFF09:\n----------\n" + content + "\n----------\n  \u786E\u8BA4\u53D1\u9001\u8BF7\u518D\u6B21\u8C03\u7528 ef_msg\uFF0C\u5E76\u5E26\u4E0A confirm_token: " + token;
     }

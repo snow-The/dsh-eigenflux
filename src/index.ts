@@ -81,6 +81,45 @@ function tokenFor(kind: string, args: string[], preview: string): string {
   return createHash('sha256').update(kind + '\u0000' + args.join('\u0000') + '\u0000' + preview).digest('hex').slice(0, 16);
 }
 
+/**
+ * Accept an item id as a numeric STRING, and rescue numbers that would be corrupted.
+ *
+ * EigenFlux ids are 18-digit snowflakes: 362115728905601024 is far above Number.MAX_SAFE_INTEGER
+ * (9007199254740991). Passing one as a JS number rounds it -- String(362115728905601024) is
+ * "362115728905601000" -- so the reply target silently becomes a DIFFERENT item. That is worse than
+ * dropping the flag: a dropped flag sends a new message, a rounded flag sends a reply to the wrong
+ * agent, and nothing reports an error either way.
+ *
+ * Measured, not theorised: the number and the string disagree in the last three digits.
+ *
+ * Strings therefore pass through untouched. A number is accepted only when it is exactly
+ * representable (<= MAX_SAFE_INTEGER); beyond that, the caller is told the id is unusable rather
+ * than being handed a plausible-looking wrong one.
+ */
+type ItemIdResult = { ok: true; id: string } | { ok: false; reason: string };
+
+function itemIdOf(value: unknown): ItemIdResult {
+  if (value == null) return { ok: true, id: '' }; // simply absent: omit the flag
+  if (typeof value === 'number') {
+    const s = String(value);
+    // Round-trip check: a number that cannot be recovered from its own decimal form has already
+    // lost information, and using it would address the wrong item.
+    if (!Number.isSafeInteger(value) || String(Number(s)) !== s) {
+      return {
+        ok: false,
+        reason: `item_id ${s} 超出 JS 安全整数范围（最大 ${Number.MAX_SAFE_INTEGER}），作为数字已被舍入。`
+          + '请以**字符串**形式传入完整 id（例如 "362115728905601024"），否则会指向另一个条目。',
+      };
+    }
+    return { ok: true, id: s };
+  }
+  const s = String(value).trim();
+  if (s === '') return { ok: true, id: '' };
+  return /^\d+$/.test(s)
+    ? { ok: true, id: s }
+    : { ok: false, reason: `item_id 必须是数字 id，收到 ${JSON.stringify(s)}。` };
+}
+
 export function apply(ctx: Context): void {
   ctx.tools.register(defineTool({
     name: 'ef_status',
@@ -228,16 +267,25 @@ export function apply(ctx: Context): void {
       '向 EigenFlux 上的另一个 agent/用户发私信。同样是两步：不带 confirm_token 只预览，带上才发送。',
     parameters: {
       content: { type: 'string', description: '消息正文' },
-      item_id: { type: 'integer', description: '要回复的 feed item id（可选）' },
+      item_id: {
+        oneOf: [
+          { type: 'string', description: '要回复的 feed item id，**请用字符串**（18 位雪花 id 作为数字会被 JS 舍入而指向别的条目）' },
+          { type: 'integer', description: '同上；仅当数值 <= 9007199254740991 时可用，超出会被拒绝并提示改用字符串' },
+        ],
+      },
       confirm_token: { type: 'string', description: '第一步返回的令牌；带上它才真正发送' },
     },
     output: { schema: { type: 'string' }, render: (_a: unknown, v: string) => [{ type: 'text', text: v }] },
-    async execute(args: { content?: string; item_id?: number; confirm_token?: string }) {
+    async execute(args: { content?: string; item_id?: number | string; confirm_token?: string }) {
       const content = String(args.content ?? '');
       if (args.confirm_token) return await confirm('message', String(args.confirm_token));
       if (!content.trim()) return '[ef_msg] 缺少 content。';
       const argv = ['msg', 'send', '--content', content];
-      if (Number.isFinite(args.item_id)) argv.push('--item-id', String(args.item_id));
+      const replyTo = itemIdOf(args.item_id);
+      // A refused id is reported, never quietly omitted: silently dropping it turns a reply into a
+      // new message, and silently rounding it addresses the wrong item. Both look like success.
+      if (!replyTo.ok) return '[ef_msg] ' + replyTo.reason;
+      if (replyTo.id !== '') argv.push('--item-id', replyTo.id);
       const token = prepare('message', argv, content);
       return '[ef_msg] 预览 —— 没有任何内容被发出。\n'
         + '  将执行: eigenflux ' + argv.map((a) => (a === content ? '<content>' : a)).join(' ') + '\n'
