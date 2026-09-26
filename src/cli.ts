@@ -161,9 +161,48 @@ export function parseCommandTable(text: string): { name: string; summary: string
   return commands;
 }
 
+/**
+ * Parse a cobra flag table out of a --help dump.
+ *
+ * Needed because a LEAF command (`feed poll`, `publish`, `stats`) has no "Available Commands:"
+ * section at all -- only flags. Without this, asking about a leaf produced an empty list, and the
+ * tool reported "no subcommands found", which reads as "the binary is missing" rather than "this
+ * command has no children". Three separate bugs in this plugin have had that same shape: a
+ * particular negative ("no subcommands", "no id", "not logged in") mistaken for a different one.
+ */
+export function parseFlagTable(text: string): { flag: string; summary: string }[] {
+  const flags: { flag: string; summary: string }[] = [];
+  const lines = text.split(/\r?\n/);
+  let inFlags = false;
+  for (const line of lines) {
+    if (/^Flags:\s*$/.test(line)) { inFlags = true; continue; }
+    if (/^Global Flags:\s*$/.test(line)) { inFlags = false; continue; }
+    if (!inFlags) continue;
+    // Rows look like:  "      --action string   refresh or more (default: refresh)"
+    //              or:  "  -h, --help            help for poll"
+    const m = /^\s{2,}((?:-\w, )?--[A-Za-z0-9-]+(?:\s+\S+)?)\s{2,}(.+)$/.exec(line);
+    if (m) flags.push({ flag: m[1].trim(), summary: m[2].trim() });
+  }
+  return flags;
+}
+
+export interface Surface {
+  commands: { name: string; summary: string }[];
+  flags: { flag: string; summary: string }[];
+  /** False when the CLI produced no help text at all (missing binary / failed invocation). */
+  reachable: boolean;
+}
+
 export async function introspect(cmd = ''): Promise<Surface> {
   const r = await runEf([...(cmd ? cmd.split(' ') : []), '--help'], { raw: true });
-  return { commands: parseCommandTable(r.stdout || r.stderr) };
+  const text = r.stdout || r.stderr;
+  return {
+    commands: parseCommandTable(text),
+    flags: parseFlagTable(text),
+    // A leaf command legitimately has no children. What must never be conflated with that is "the
+    // binary did not answer", which is why reachability is reported separately from table contents.
+    reachable: text.trim().length > 0,
+  };
 }
 
 /**

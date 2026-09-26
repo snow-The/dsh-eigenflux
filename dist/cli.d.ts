@@ -77,6 +77,31 @@ export declare function parseCommandTable(text: string): {
     name: string;
     summary: string;
 }[];
+/**
+ * Parse a cobra flag table out of a --help dump.
+ *
+ * Needed because a LEAF command (`feed poll`, `publish`, `stats`) has no "Available Commands:"
+ * section at all -- only flags. Without this, asking about a leaf produced an empty list, and the
+ * tool reported "no subcommands found", which reads as "the binary is missing" rather than "this
+ * command has no children". Three separate bugs in this plugin have had that same shape: a
+ * particular negative ("no subcommands", "no id", "not logged in") mistaken for a different one.
+ */
+export declare function parseFlagTable(text: string): {
+    flag: string;
+    summary: string;
+}[];
+export interface Surface {
+    commands: {
+        name: string;
+        summary: string;
+    }[];
+    flags: {
+        flag: string;
+        summary: string;
+    }[];
+    /** False when the CLI produced no help text at all (missing binary / failed invocation). */
+    reachable: boolean;
+}
 export declare function introspect(cmd?: string): Promise<Surface>;
 /**
  * The CLI's own exit-code contract (cli/internal/output/output.go:15-23):

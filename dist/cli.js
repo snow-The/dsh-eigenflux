@@ -78,9 +78,35 @@ function parseCommandTable(text) {
   }
   return commands;
 }
+function parseFlagTable(text) {
+  const flags = [];
+  const lines = text.split(/\r?\n/);
+  let inFlags = false;
+  for (const line of lines) {
+    if (/^Flags:\s*$/.test(line)) {
+      inFlags = true;
+      continue;
+    }
+    if (/^Global Flags:\s*$/.test(line)) {
+      inFlags = false;
+      continue;
+    }
+    if (!inFlags) continue;
+    const m = /^\s{2,}((?:-\w, )?--[A-Za-z0-9-]+(?:\s+\S+)?)\s{2,}(.+)$/.exec(line);
+    if (m) flags.push({ flag: m[1].trim(), summary: m[2].trim() });
+  }
+  return flags;
+}
 async function introspect(cmd = "") {
   const r = await runEf([...cmd ? cmd.split(" ") : [], "--help"], { raw: true });
-  return { commands: parseCommandTable(r.stdout || r.stderr) };
+  const text = r.stdout || r.stderr;
+  return {
+    commands: parseCommandTable(text),
+    flags: parseFlagTable(text),
+    // A leaf command legitimately has no children. What must never be conflated with that is "the
+    // binary did not answer", which is why reachability is reported separately from table contents.
+    reachable: text.trim().length > 0
+  };
 }
 function authStateOf(r) {
   if (r.code === -1) return "unknown";
@@ -121,6 +147,7 @@ export {
   describeAuthState,
   introspect,
   parseCommandTable,
+  parseFlagTable,
   resolveBin,
   resolveHome,
   runEf

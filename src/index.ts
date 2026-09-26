@@ -175,25 +175,38 @@ export function apply(ctx: Context): void {
     async execute(args: { cmd?: string }) {
       const cmd = String(args.cmd ?? '').trim();
       const s = await introspect(cmd);
-      if (s.commands.length === 0) {
-        return `[ef_surface${cmd ? ' ' + cmd : ''}] 未解析到子命令。`
+      const label = `[ef_surface${cmd ? ' ' + cmd : ''}]`;
+      // Reachability and emptiness are different facts. A LEAF command has no children by design, and
+      // reporting that as "the binary may not be installed" was wrong three ways: it alarmed the
+      // user, it hid the flags that ARE there, and it made a working install look broken.
+      if (!s.reachable) {
+        return label + ' 没有取到任何 --help 输出。'
           + '该二进制可能未安装，或用法有变——请直接跑 `eigenflux --help` 核对。';
       }
-      return `[ef_surface${cmd ? ' ' + cmd : ''}] ${s.commands.length} 个子命令（来自二进制自身的 --help）\n`
-        + s.commands.map((c) => `  ${c.name.padEnd(14)} ${c.summary}`).join('\n');
+      const head = s.commands.length > 0
+        ? `${s.commands.length} 个子命令（来自二进制自身的 --help）\n`
+          + s.commands.map((c) => `  ${c.name.padEnd(14)} ${c.summary}`).join('\n')
+        : `这是一条叶子命令（没有子命令）。`;
+      const flagBlock = s.flags.length > 0
+        ? `\n  flags（${s.flags.length}）:\n` + s.flags.map((f) => `    ${f.flag.padEnd(22)} ${f.summary}`).join('\n')
+        : '';
+      return label + ' ' + head + flagBlock;
     },
   }));
 
   ctx.tools.register(defineTool({
     name: 'ef_feed',
     description:
-      '读取 EigenFlux feed（只读）。返回内容一律标注为外部来源。limit 默认 10，上限 50。不写任何本地或远端状态。',
+      '读取 EigenFlux feed（只读）。返回内容一律标注为外部来源。limit 默认 10，上限 20（Feed V2 的硬限制，超出会被拒）。不写任何本地或远端状态。',
     parameters: {
-      limit: { type: 'integer', description: '条数，默认 10，上限 50' },
+      limit: { type: 'integer', description: '条数，默认 10，上限 20（Feed V2 硬限制）' },
     },
     output: { schema: { type: 'string' }, render: (_a: unknown, v: string) => [{ type: 'text', text: v }] },
     async execute(args: { limit?: number }) {
-      const n = Math.max(1, Math.min(50, Number(args.limit ?? 10) || 10));
+      // 20 is the SERVER's cap for Feed V2, measured: asking for 50 is refused outright with
+      // "--limit must be between 1 and 20 for Feed V2". Clamping to the real bound beats forwarding
+      // a request that can only fail.
+      const n = Math.max(1, Math.min(20, Number(args.limit ?? 10) || 10));
       const r = await runEf(['feed', 'poll', '--limit', String(n)], { timeoutSec: 60 });
       const state = authStateOf(r);
       // A refusal is a STATE, not content. Returning the CLI's one-line error unlabelled would put

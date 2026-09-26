@@ -82,9 +82,35 @@ function parseCommandTable(text) {
   }
   return commands;
 }
+function parseFlagTable(text) {
+  const flags = [];
+  const lines = text.split(/\r?\n/);
+  let inFlags = false;
+  for (const line of lines) {
+    if (/^Flags:\s*$/.test(line)) {
+      inFlags = true;
+      continue;
+    }
+    if (/^Global Flags:\s*$/.test(line)) {
+      inFlags = false;
+      continue;
+    }
+    if (!inFlags) continue;
+    const m = /^\s{2,}((?:-\w, )?--[A-Za-z0-9-]+(?:\s+\S+)?)\s{2,}(.+)$/.exec(line);
+    if (m) flags.push({ flag: m[1].trim(), summary: m[2].trim() });
+  }
+  return flags;
+}
 async function introspect(cmd = "") {
   const r = await runEf([...cmd ? cmd.split(" ") : [], "--help"], { raw: true });
-  return { commands: parseCommandTable(r.stdout || r.stderr) };
+  const text = r.stdout || r.stderr;
+  return {
+    commands: parseCommandTable(text),
+    flags: parseFlagTable(text),
+    // A leaf command legitimately has no children. What must never be conflated with that is "the
+    // binary did not answer", which is why reachability is reported separately from table contents.
+    reachable: text.trim().length > 0
+  };
 }
 function authStateOf(r) {
   if (r.code === -1) return "unknown";
@@ -206,22 +232,27 @@ function apply(ctx) {
     async execute(args) {
       const cmd = String(args.cmd ?? "").trim();
       const s = await introspect(cmd);
-      if (s.commands.length === 0) {
-        return `[ef_surface${cmd ? " " + cmd : ""}] \u672A\u89E3\u6790\u5230\u5B50\u547D\u4EE4\u3002\u8BE5\u4E8C\u8FDB\u5236\u53EF\u80FD\u672A\u5B89\u88C5\uFF0C\u6216\u7528\u6CD5\u6709\u53D8\u2014\u2014\u8BF7\u76F4\u63A5\u8DD1 \`eigenflux --help\` \u6838\u5BF9\u3002`;
+      const label = `[ef_surface${cmd ? " " + cmd : ""}]`;
+      if (!s.reachable) {
+        return label + " \u6CA1\u6709\u53D6\u5230\u4EFB\u4F55 --help \u8F93\u51FA\u3002\u8BE5\u4E8C\u8FDB\u5236\u53EF\u80FD\u672A\u5B89\u88C5\uFF0C\u6216\u7528\u6CD5\u6709\u53D8\u2014\u2014\u8BF7\u76F4\u63A5\u8DD1 `eigenflux --help` \u6838\u5BF9\u3002";
       }
-      return `[ef_surface${cmd ? " " + cmd : ""}] ${s.commands.length} \u4E2A\u5B50\u547D\u4EE4\uFF08\u6765\u81EA\u4E8C\u8FDB\u5236\u81EA\u8EAB\u7684 --help\uFF09
-` + s.commands.map((c) => `  ${c.name.padEnd(14)} ${c.summary}`).join("\n");
+      const head = s.commands.length > 0 ? `${s.commands.length} \u4E2A\u5B50\u547D\u4EE4\uFF08\u6765\u81EA\u4E8C\u8FDB\u5236\u81EA\u8EAB\u7684 --help\uFF09
+` + s.commands.map((c) => `  ${c.name.padEnd(14)} ${c.summary}`).join("\n") : `\u8FD9\u662F\u4E00\u6761\u53F6\u5B50\u547D\u4EE4\uFF08\u6CA1\u6709\u5B50\u547D\u4EE4\uFF09\u3002`;
+      const flagBlock = s.flags.length > 0 ? `
+  flags\uFF08${s.flags.length}\uFF09:
+` + s.flags.map((f) => `    ${f.flag.padEnd(22)} ${f.summary}`).join("\n") : "";
+      return label + " " + head + flagBlock;
     }
   }));
   ctx.tools.register(defineTool({
     name: "ef_feed",
-    description: "\u8BFB\u53D6 EigenFlux feed\uFF08\u53EA\u8BFB\uFF09\u3002\u8FD4\u56DE\u5185\u5BB9\u4E00\u5F8B\u6807\u6CE8\u4E3A\u5916\u90E8\u6765\u6E90\u3002limit \u9ED8\u8BA4 10\uFF0C\u4E0A\u9650 50\u3002\u4E0D\u5199\u4EFB\u4F55\u672C\u5730\u6216\u8FDC\u7AEF\u72B6\u6001\u3002",
+    description: "\u8BFB\u53D6 EigenFlux feed\uFF08\u53EA\u8BFB\uFF09\u3002\u8FD4\u56DE\u5185\u5BB9\u4E00\u5F8B\u6807\u6CE8\u4E3A\u5916\u90E8\u6765\u6E90\u3002limit \u9ED8\u8BA4 10\uFF0C\u4E0A\u9650 20\uFF08Feed V2 \u7684\u786C\u9650\u5236\uFF0C\u8D85\u51FA\u4F1A\u88AB\u62D2\uFF09\u3002\u4E0D\u5199\u4EFB\u4F55\u672C\u5730\u6216\u8FDC\u7AEF\u72B6\u6001\u3002",
     parameters: {
-      limit: { type: "integer", description: "\u6761\u6570\uFF0C\u9ED8\u8BA4 10\uFF0C\u4E0A\u9650 50" }
+      limit: { type: "integer", description: "\u6761\u6570\uFF0C\u9ED8\u8BA4 10\uFF0C\u4E0A\u9650 20\uFF08Feed V2 \u786C\u9650\u5236\uFF09" }
     },
     output: { schema: { type: "string" }, render: (_a, v) => [{ type: "text", text: v }] },
     async execute(args) {
-      const n = Math.max(1, Math.min(50, Number(args.limit ?? 10) || 10));
+      const n = Math.max(1, Math.min(20, Number(args.limit ?? 10) || 10));
       const r = await runEf(["feed", "poll", "--limit", String(n)], { timeoutSec: 60 });
       const state = authStateOf(r);
       if (state === "no-identity" || state === "auth-required") {
